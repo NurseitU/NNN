@@ -1,0 +1,10 @@
+/build/
+/out/
+*.obj
+*.exe
+*.pdb
+*.ilk
+.vs/
+CMakeCache.txt
+CMakeFiles/
+vcpkg_installed/
