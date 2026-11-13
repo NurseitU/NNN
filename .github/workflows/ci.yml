@@ -61,7 +61,16 @@ jobs:
           foreach ($name in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi",
                             "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
             curl.exe -fsSL --retry 3 -o "gst-msi\$name" "$base/$name"
-            if ($LASTEXITCODE -ne 0) { throw "не удалось скачать $name" }
+            if ($LASTEXITCODE -ne 0) {
+              # Показать, что реально лежит на сервере, чтобы было видно верное имя файла.
+              foreach ($dir in "$base/", "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/",
+                               "https://gstreamer.freedesktop.org/data/pkg/windows/") {
+                Write-Host "--- содержимое $dir"
+                (curl.exe -sL $dir) | Select-String -Pattern 'href="([^"?]+)"' -AllMatches |
+                  ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value } | Select-Object -Last 60
+              }
+              throw "не удалось скачать $name"
+            }
           }
 
       - name: Установка GStreamer
