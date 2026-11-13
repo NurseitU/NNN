@@ -7,11 +7,10 @@ on:
 permissions:
   contents: read
 
-# Новый запуск ждёт окончания предыдущего на той же ветке, а не отменяет его:
-# иначе прерванное задание Windows не успевает сохранить кэш установщиков.
+# Новый push на ту же ветку отменяет ещё идущий запуск.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   linux:
@@ -52,28 +51,29 @@ jobs:
         uses: actions/cache@v4
         with:
           path: gst-msi
-          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}
+          key: gstreamer-devel-msvc-x86_64-${{ env.GST_VERSION }}
 
+      # Для сборки нужен только пакет разработки (заголовки, .lib, .pc).
+      # Сервер отдаёт файлы медленно и иногда рвёт соединение, поэтому докачка с повторами.
       - name: Загрузка GStreamer
         if: steps.gst-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force gst-msi | Out-Null
-          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
-          foreach ($name in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi",
-                            "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
-            curl.exe -fsSL --retry 3 -o "gst-msi\$name" "$base/$name"
-            if ($LASTEXITCODE -ne 0) {
-              # Показать, что реально лежит на сервере, чтобы было видно верное имя файла.
-              foreach ($dir in "$base/", "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/",
-                               "https://gstreamer.freedesktop.org/data/pkg/windows/") {
-                Write-Host "--- содержимое $dir"
-                (curl.exe -sL $dir) | Select-String -Pattern 'href="([^"?]+)"' -AllMatches |
-                  ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value } | Select-Object -Last 60
-              }
-              throw "не удалось скачать $name"
-            }
+          $name = "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi"
+          $url  = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc/$name"
+          $ok = $false
+          foreach ($attempt in 1..8) {
+            curl.exe -fSL -C - --connect-timeout 30 -o "gst-msi\$name" $url
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Write-Host "попытка $attempt не удалась (код $LASTEXITCODE), докачиваю"
+            Start-Sleep -Seconds 5
           }
+          if (-not $ok) {
+            Remove-Item "gst-msi\$name" -ErrorAction SilentlyContinue
+            throw "не удалось скачать $url"
+          }
+          Get-ChildItem gst-msi | Format-Table Name, Length
 
       - name: Установка GStreamer
         shell: pwsh
@@ -84,14 +84,23 @@ jobs:
             if ($p.ExitCode -ne 0) { throw "msiexec завершился с кодом $($p.ExitCode) для $($msi.Name)" }
           }
           if (-not (Test-Path "$env:GST_ROOT\lib\pkgconfig\gstreamer-rtsp-server-1.0.pc")) {
+            Get-ChildItem C:\gstreamer -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 40 FullName
             throw "GStreamer не найден в $env:GST_ROOT"
           }
-          "$env:GST_ROOT\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # pkg-config: берём из GStreamer, если он там есть, иначе ставим отдельно.
+          $pkg = "$env:GST_ROOT\bin\pkg-config.exe"
+          if (-not (Test-Path $pkg)) {
+            choco install pkgconfiglite -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "не удалось установить pkg-config" }
+            $pkg = (Get-Command pkg-config.exe).Source
+          }
+          Write-Host "pkg-config: $pkg"
+          "PKG_CONFIG_EXE=$pkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "PKG_CONFIG_PATH=$env:GST_ROOT\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Конфигурация
         shell: pwsh
-        run: cmake -B build -S . -DPKG_CONFIG_EXECUTABLE="$env:GST_ROOT\bin\pkg-config.exe"
+        run: cmake -B build -S . -DPKG_CONFIG_EXECUTABLE="$env:PKG_CONFIG_EXE"
 
       - name: Сборка
         run: cmake --build build --config Release
