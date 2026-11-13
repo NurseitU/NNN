@@ -1,6 +1,7 @@
 #pragma once
 #include "config.hpp"
 #include <atomic>
+#include <string>
 #include <thread>
 
 // WsDiscovery: минимальный ответчик WS-Discovery (ONVIF).
@@ -15,9 +16,13 @@ public:
     bool start();   // поднимает UDP-сокет и фоновый поток
     void stop();
 
+    // Разбор входящей датаграммы: возвращает текст ответа (ProbeMatch) или пустую
+    // строку, если отвечать не нужно. Без работы с сетью — открыто для модульных тестов.
+    std::string handleMessage(const std::string& xml) const;
+    std::string buildProbeMatch(const std::string& relatesToMsgId) const;
+
 private:
     void run();
-    std::string buildProbeMatch(const std::string& relatesToMsgId) const;
 
     Config cfg_;
     std::atomic<bool> running_{false};

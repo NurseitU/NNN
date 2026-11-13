@@ -38,9 +38,13 @@ static std::string detectLocalIpv4() {
 }
 
 // Простейший разбор аргументов: --monitor N --fps N --bitrate K --rtsp-port P --onvif-port P
+// Флаг без значения: --test-pattern (тестовая картинка вместо захвата экрана).
 static void parseArgs(int argc, char** argv, Config& c) {
-    for (int i = 1; i + 1 < argc; i += 2) {
-        std::string k = argv[i], v = argv[i + 1];
+    for (int i = 1; i < argc; ++i) {
+        std::string k = argv[i];
+        if (k == "--test-pattern") { c.testPattern = true; continue; }
+        if (i + 1 >= argc) break;              // у остальных ключей обязательно значение
+        std::string v = argv[++i];
         if      (k == "--monitor")    c.monitorIndex = std::stoi(v);
         else if (k == "--fps")        c.fps = std::stoi(v);
         else if (k == "--bitrate")    c.bitrateKbps = std::stoi(v);
@@ -56,14 +60,27 @@ int main(int argc, char** argv) {
     parseArgs(argc, argv, cfg);
     cfg.localIp = detectLocalIpv4();
 
+#ifndef _WIN32
+    // Захват экрана (DXGI) есть только на Windows; на остальных платформах
+    // отдаём тестовую картинку, чтобы тракт RTSP/ONVIF можно было проверить.
+    if (!cfg.testPattern) {
+        std::printf("Захват экрана доступен только на Windows — включён тестовый источник.\n");
+        cfg.testPattern = true;
+    }
+#endif
+
     std::printf("=== s2rtsp: экран -> ONVIF/RTSP камера (прототип) ===\n");
-    std::printf("Монитор %d, %d fps, %d кбит/с, IP %s\n",
-                cfg.monitorIndex, cfg.fps, cfg.bitrateKbps, cfg.localIp.c_str());
+    if (cfg.testPattern)
+        std::printf("Источник: тестовая картинка, %d fps, %d кбит/с, IP %s\n",
+                    cfg.fps, cfg.bitrateKbps, cfg.localIp.c_str());
+    else
+        std::printf("Монитор %d, %d fps, %d кбит/с, IP %s\n",
+                    cfg.monitorIndex, cfg.fps, cfg.bitrateKbps, cfg.localIp.c_str());
 
     MediaServer media(cfg);
     if (!media.start()) { std::fprintf(stderr, "Ошибка запуска RTSP\n"); return 1; }
 
-    OnvifService onvif(cfg, media);
+    OnvifService onvif(cfg, media.streamUri());
     if (!onvif.start()) { std::fprintf(stderr, "Ошибка запуска ONVIF\n"); return 1; }
 
     WsDiscovery wsd(cfg);

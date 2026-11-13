@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (сборка, тесты, RTSP)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка GStreamer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libgstreamer1.0-dev libgstrtspserver-1.0-dev libglib2.0-dev pkg-config \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-tools
+
+      - name: Конфигурация
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Wall -Wextra"
+
+      - name: Сборка
+        run: cmake --build build -j4
+
+      # unit — модульные тесты; smoke_rtsp — запуск с тестовой картинкой и приём потока.
+      - name: Тесты
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows (сборка MSVC, тесты)
+    runs-on: windows-latest
+    env:
+      GST_VERSION: "1.24.12"
+      GST_ROOT: C:\gstreamer\1.0\msvc_x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Кэш установщиков GStreamer
+        id: gst-cache
+        uses: actions/cache@v4
+        with:
+          path: gst-msi
+          key: gstreamer-msvc-x86_64-${{ env.GST_VERSION }}
+
+      - name: Загрузка GStreamer
+        if: steps.gst-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force gst-msi | Out-Null
+          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
+          foreach ($name in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi",
+                            "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
+            curl.exe -fsSL --retry 3 -o "gst-msi\$name" "$base/$name"
+            if ($LASTEXITCODE -ne 0) { throw "не удалось скачать $name" }
+          }
+
+      - name: Установка GStreamer
+        shell: pwsh
+        run: |
+          foreach ($msi in Get-ChildItem gst-msi\*.msi) {
+            $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList `
+              '/i', $msi.FullName, '/qn', '/norestart', 'INSTALLDIR=C:\gstreamer', 'ADDLOCAL=ALL'
+            if ($p.ExitCode -ne 0) { throw "msiexec завершился с кодом $($p.ExitCode) для $($msi.Name)" }
+          }
+          if (-not (Test-Path "$env:GST_ROOT\lib\pkgconfig\gstreamer-rtsp-server-1.0.pc")) {
+            throw "GStreamer не найден в $env:GST_ROOT"
+          }
+          "$env:GST_ROOT\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "PKG_CONFIG_PATH=$env:GST_ROOT\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Конфигурация
+        shell: pwsh
+        run: cmake -B build -S . -DPKG_CONFIG_EXECUTABLE="$env:GST_ROOT\bin\pkg-config.exe"
+
+      - name: Сборка
+        run: cmake --build build --config Release
+
+      - name: Тесты
+        run: ctest --test-dir build -C Release --output-on-failure

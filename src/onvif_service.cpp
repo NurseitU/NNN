@@ -1,22 +1,12 @@
 #include "onvif_service.hpp"
+#include "net_compat.hpp"
 
 #include <string>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
-
-#ifdef _WIN32
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  #pragma comment(lib, "ws2_32.lib")
-  using socklen_t = int;
-#else
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
-  #include <unistd.h>
-  #define closesocket ::close
-#endif
+#include <utility>
 
 namespace {
 
@@ -55,8 +45,8 @@ std::string httpResponse(const std::string& xml) {
 
 } // namespace
 
-OnvifService::OnvifService(const Config& cfg, const MediaServer& media)
-    : cfg_(cfg), media_(media) {}
+OnvifService::OnvifService(const Config& cfg, std::string streamUri)
+    : cfg_(cfg), streamUri_(std::move(streamUri)) {}
 
 OnvifService::~OnvifService() { stop(); }
 
@@ -65,7 +55,7 @@ std::string OnvifService::dispatch(const std::string& body) const {
         "http://" + cfg_.localIp + ":" + std::to_string(cfg_.onvifPort) + "/onvif/device_service";
     const std::string medXAddr =
         "http://" + cfg_.localIp + ":" + std::to_string(cfg_.onvifPort) + "/onvif/media_service";
-    const std::string rtsp = media_.streamUri();
+    const std::string& rtsp = streamUri_;
 
     auto has = [&](const char* op) { return body.find(op) != std::string::npos; };
 
@@ -148,9 +138,7 @@ std::string OnvifService::dispatch(const std::string& body) const {
 }
 
 bool OnvifService::start() {
-#ifdef _WIN32
-    WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
-#endif
+    netInit();
     listenSock_ = (int)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listenSock_ < 0) return false;
 
@@ -175,6 +163,9 @@ bool OnvifService::start() {
 
 void OnvifService::run() {
     while (running_) {
+        // Ждём подключения с таймаутом, чтобы stop() мог завершить поток.
+        if (!waitReadable(listenSock_, 200)) continue;
+
         sockaddr_in cli{}; socklen_t cl = sizeof(cli);
         int c = (int)accept(listenSock_, (sockaddr*)&cli, &cl);
         if (c < 0) continue;
@@ -210,6 +201,7 @@ void OnvifService::run() {
 void OnvifService::stop() {
     if (!running_) return;
     running_ = false;
-    if (listenSock_ >= 0) { closesocket(listenSock_); listenSock_ = -1; }
+    // Сначала дожидаемся потока (он выйдет по таймауту ожидания), потом закрываем сокет.
     if (worker_.joinable()) worker_.join();
+    if (listenSock_ >= 0) { closesocket(listenSock_); listenSock_ = -1; }
 }
