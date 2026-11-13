@@ -1,48 +1,10 @@
 #include "media_server.hpp"
+#include "pipeline.hpp"
 
 #include <gst/gst.h>
 #include <gst/rtsp-server/rtsp-server.h>
 
 #include <string>
-
-namespace {
-
-// Строит GStreamer-пайплайн: захват монитора -> H.264 -> RTP payloader.
-// Элемент payloader ОБЯЗАН называться pay0 (требование gst-rtsp-server).
-//
-// Аппаратный путь (DXGI + HW-энкодер). Если d3d11h264enc недоступен на машине,
-// определите макрос S2RTSP_SOFTWARE_ENCODER для software-пути (x264enc).
-std::string buildPipeline(const Config& c) {
-    const std::string fps = std::to_string(c.fps);
-    const std::string br  = std::to_string(c.bitrateKbps);
-    const std::string cur = c.showCursor ? "true" : "false";
-
-#ifndef S2RTSP_SOFTWARE_ENCODER
-    // Аппаратный кодер (меньше задержка, меньше CPU).
-    return
-        "d3d11screencapturesrc monitor-index=" + std::to_string(c.monitorIndex) +
-        " show-cursor=" + cur +
-        " ! video/x-raw(memory:D3D11Memory),framerate=" + fps + "/1"
-        " ! d3d11convert"
-        " ! d3d11h264enc bitrate=" + br +
-        " ! h264parse config-interval=1"
-        " ! rtph264pay name=pay0 pt=96";
-#else
-    // Программный кодер (универсальный фоллбэк).
-    // key-int-max=fps => IDR раз в секунду, config-interval=1 => SPS/PPS в потоке.
-    return
-        "d3d11screencapturesrc monitor-index=" + std::to_string(c.monitorIndex) +
-        " show-cursor=" + cur +
-        " ! video/x-raw(memory:D3D11Memory),framerate=" + fps + "/1"
-        " ! d3d11download ! videoconvert"
-        " ! x264enc tune=zerolatency speed-preset=veryfast"
-        " key-int-max=" + fps + " bitrate=" + br +
-        " ! h264parse config-interval=1"
-        " ! rtph264pay name=pay0 pt=96";
-#endif
-}
-
-} // namespace
 
 MediaServer::MediaServer(const Config& cfg) : cfg_(cfg) {}
 

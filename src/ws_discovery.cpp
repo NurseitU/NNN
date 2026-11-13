@@ -1,21 +1,9 @@
 #include "ws_discovery.hpp"
+#include "net_compat.hpp"
 
 #include <string>
 #include <cstring>
 #include <cstdio>
-
-#ifdef _WIN32
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  #pragma comment(lib, "ws2_32.lib")
-  using socklen_t = int;
-#else
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
-  #include <unistd.h>
-  #define closesocket ::close
-#endif
 
 namespace {
 constexpr char   kMcastAddr[] = "239.255.255.250";
@@ -69,9 +57,7 @@ std::string WsDiscovery::buildProbeMatch(const std::string& relatesTo) const {
 }
 
 bool WsDiscovery::start() {
-#ifdef _WIN32
-    WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
-#endif
+    netInit();
     sock_ = (int)socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock_ < 0) return false;
 
@@ -97,23 +83,25 @@ bool WsDiscovery::start() {
     return true;
 }
 
+std::string WsDiscovery::handleMessage(const std::string& xml) const {
+    // Отвечаем на любой Probe: с типом NetworkVideoTransmitter, Device или вовсе
+    // без типа (некоторые клиенты шлют именно так).
+    if (xml.find("Probe") == std::string::npos) return "";
+    return buildProbeMatch(extractMessageId(xml));
+}
+
 void WsDiscovery::run() {
     char buf[8192];
     while (running_) {
+        // Ждём датаграмму с таймаутом, чтобы stop() мог завершить поток.
+        if (!waitReadable(sock_, 200)) continue;
+
         sockaddr_in from{}; socklen_t fl = sizeof(from);
         int n = recvfrom(sock_, buf, sizeof(buf) - 1, 0, (sockaddr*)&from, &fl);
         if (n <= 0) continue;
-        buf[n] = '\0';
-        std::string xml(buf, n);
 
-        // Отвечаем только на Probe c типом NetworkVideoTransmitter (или на любой Probe).
-        if (xml.find("Probe") == std::string::npos) continue;
-        if (xml.find("NetworkVideoTransmitter") == std::string::npos &&
-            xml.find("Device") == std::string::npos) {
-            // Некоторые клиенты шлют Probe без типа — тоже отвечаем.
-        }
-
-        const std::string reply = buildProbeMatch(extractMessageId(xml));
+        const std::string reply = handleMessage(std::string(buf, n));
+        if (reply.empty()) continue;
         sendto(sock_, reply.c_str(), (int)reply.size(), 0, (sockaddr*)&from, fl);
     }
 }
@@ -121,6 +109,7 @@ void WsDiscovery::run() {
 void WsDiscovery::stop() {
     if (!running_) return;
     running_ = false;
-    if (sock_ >= 0) { closesocket(sock_); sock_ = -1; }
+    // Сначала дожидаемся потока (он выйдет по таймауту ожидания), потом закрываем сокет.
     if (worker_.joinable()) worker_.join();
+    if (sock_ >= 0) { closesocket(sock_); sock_ = -1; }
 }

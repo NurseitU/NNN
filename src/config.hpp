@@ -9,6 +9,7 @@ struct Config {
     int      fps          = 30;     // частота кадров
     int      bitrateKbps  = 6000;   // битрейт H.264, кбит/с
     bool     showCursor   = true;   // рисовать курсор в потоке
+    bool     testPattern  = false;  // тестовая картинка вместо захвата экрана (--test-pattern)
 
     uint16_t rtspPort     = 8554;   // RTSP (TCP)
     uint16_t onvifPort    = 8080;   // ONVIF Device/Media SOAP (HTTP)
