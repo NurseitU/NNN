@@ -11,6 +11,7 @@ BIN="${1:?usage: smoke_rtsp.sh <path-to-s2rtsp>}"
 ONVIF_PORT="${ONVIF_PORT:-18080}"
 RTSP_PORT="${RTSP_PORT:-18554}"
 FRAMES="${FRAMES:-30}"
+TIMEOUT="${TIMEOUT:-60}"   # секунд на приём; FRAMES / 15 должно быть заметно меньше
 
 LOG="$(mktemp)"
 "$BIN" --test-pattern --fps 15 --bitrate 1000 \
@@ -48,7 +49,7 @@ URI="$(printf '%s' "$RESP" | sed -n 's:.*<tt\:Uri>\(.*\)</tt\:Uri>.*:\1:p')"
 echo "ONVIF GetStreamUri -> $URI"
 
 # 2. Принимаем FRAMES буферов H.264 по RTSP; fakesink завершит пайплайн сам.
-if ! timeout 60 gst-launch-1.0 -q \
+if ! timeout "$TIMEOUT" gst-launch-1.0 -q \
         rtspsrc location="$URI" protocols=tcp latency=0 \
         ! rtph264depay ! h264parse \
         ! fakesink num-buffers="$FRAMES" sync=false; then

@@ -7,9 +7,11 @@ on:
 permissions:
   contents: read
 
+# Новый запуск ждёт окончания предыдущего на той же ветке, а не отменяет его:
+# иначе прерванное задание Windows не успевает сохранить кэш установщиков.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   linux:
