@@ -25,11 +25,25 @@ build\Release\s2rtsp.exe --monitor 0 --fps 30 --bitrate 6000
 - `-DS2RTSP_SOFTWARE_ENCODER=ON` переключает `d3d11h264enc` на `x264enc`.
 - Тестов, линтера и CI в репозитории нет. Проверка ручная: VLC по
   `rtsp://<IP>:8554/stream`, затем ONVIF Device Manager.
-- В облачном Linux-контейнере есть `cmake`, `g++`, `clang++`, но нет GStreamer,
-  поэтому проект там не собирается и не запускается. Изменения, сделанные без
-  сборки, нужно явно помечать как непроверенные.
-- В сетевых модулях есть POSIX-ветки (`#else` у `_WIN32`), но сборка под Linux
-  не проверялась, а захват экрана там не работает в принципе.
+- Под Linux проект собирается и запускается (проверено на Ubuntu 24.04,
+  GStreamer 1.24), если поставить пакеты разработки:
+
+  ```bash
+  apt-get install -y libgstreamer1.0-dev libgstrtspserver-1.0-dev libglib2.0-dev pkg-config
+  cmake -B build -S . && cmake --build build -j4
+  ```
+
+- На Linux можно проверять ONVIF и запуск RTSP-сервера, например:
+
+  ```bash
+  ./build/s2rtsp --onvif-port 18080 --rtsp-port 18554 &
+  curl -s -X POST -d '<GetStreamUri/>' http://127.0.0.1:18080/onvif/media_service
+  ```
+
+- Сам видеопоток на Linux не проверить: пайплайн использует
+  `d3d11screencapturesrc`, которого там нет. `localIp` на Linux всегда
+  `127.0.0.1`. Всё, что касается захвата и кодирования, без проверки на
+  Windows нужно явно помечать как непроверенное.
 
 ## Устройство кода
 
