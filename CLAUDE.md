@@ -74,6 +74,7 @@ WS-Security при заданных `--user/--pass`, разрешение 1920×
 - Отступ 4 пробела, `#pragma once`, поля класса с суффиксом `_`, вспомогательные
   функции — в анонимном `namespace` в `.cpp`.
 - Сокеты хранятся как `int`; платформенные различия закрываются блоками
-  `#ifdef _WIN32` в начале `.cpp`, а не разбросаны по коду.
-- Новые зависимости добавлять только через `pkg_check_modules` в
-  `CMakeLists.txt` и одновременно в команду `vcpkg install` в `README.md`.
+  `#ifdef _WIN32` (заголовки и `closesocket` — в начале `.cpp`, `WSAStartup` —
+  в `start()`).
+- Зависимости подключаются через `pkg_check_modules` в `CMakeLists.txt`; при
+  добавлении новой нужно обновить и команду `vcpkg install` в `README.md`.
