@@ -40,7 +40,7 @@ jobs:
     name: Windows (сборка MSVC, тесты)
     runs-on: windows-latest
     env:
-      GST_VERSION: "1.24.12"
+      GST_VERSION: "1.24.13"
       GST_ROOT: C:\gstreamer\1.0\msvc_x86_64
     steps:
       - uses: actions/checkout@v4
